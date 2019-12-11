@@ -7,7 +7,6 @@
 #include "sfObjectMap.h"
 #include "sfPropertyManager.h"
 #include "sfPropertyUtil.h"
-#include "sfSelectionManager.h"
 #include "sfLoader.h"
 #include "sfUnrealUtils.h"
 #include "SceneFusionEdMode.h"
@@ -168,7 +167,6 @@ void SceneFusion::OnConnect()
     MissingObjectManager->Initialize();
     sfUndoManager::Get().Initialize();
     sfPropertyManager::Get().EnablePropertyChangeHandler();
-    sfSelectionManager::Get().Start();
     sfObjectMap::EnableDeleteListener();
     sfLoader::Get().Start();
     m_onUserColorChangeEventPtr = Service->Session()->RegisterOnUserColorChangeHandler(&OnUserColorChange);
@@ -204,7 +202,6 @@ void SceneFusion::CleanUp()
     sfUndoManager::Get().CleanUp();
     sfPropertyManager::Get().CleanUp();
     sfPropertyManager::Get().DisablePropertyChangeHandler();
-    sfSelectionManager::Get().Stop();
     sfObjectMap::DisableDeleteListener();
     sfObjectMap::Clear();
     sfLoader::Get().Stop();
@@ -229,7 +226,6 @@ bool SceneFusion::Tick(float deltaTime)
         sfPropertyManager::Get().BroadcastChangeEvents();
         sfPropertyManager::Get().SyncProperties();
         sfPropertyManager::Get().RehashProperties();// rehash in case properties were reverted on locked objects
-        sfSelectionManager::Get().Update();
         OnTick.Broadcast(deltaTime);
     }
 
@@ -538,7 +534,7 @@ void SceneFusion::OnHotReload(bool automatic)
                 // Components may have been added or removed to so we sync components
                 TSharedPtr<sfComponentTranslator> componentTranslatorPtr = GetTranslator<sfComponentTranslator>(
                     sfType::Component);
-                componentTranslatorPtr->SyncComponents(actorPtr);
+                componentTranslatorPtr->SyncComponents(actorPtr, objPtr);
             }
         }
     }

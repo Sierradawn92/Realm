@@ -27,7 +27,7 @@ sfUIPanel::sfUIPanel(const FString& title)
     ];
 
     // Panels are hidden by default.
-    m_msgPtr->SetVisibility(EVisibility::Collapsed);
+    m_msgPtr->SetVisibility(EVisibility::Hidden);
 }
 
 TSharedRef<SScrollBox> sfUIPanel::Widget()
@@ -67,21 +67,9 @@ void sfUIPanel::Disable()
     }
 }
 
-void sfUIPanel::DisplayMessage(
-    const FString& error,
-    sfUIMessageBox::Icon icon,
-    sfUIMessageBox::OnClickDelegate onClick)
+void sfUIPanel::DisplayMessage(const FString& error, sfUIMessageBox::Icon icon)
 {
-    if (m_msgPtr.IsValid())
-    {
-        m_msgPtr->SetMessage(error, icon, onClick);
-    }
-}
-
-void sfUIPanel::ClearMessage()
-{
-    if (m_msgPtr.IsValid())
-    {
-        m_msgPtr->SetVisibility(EVisibility::Collapsed);
+    if (m_msgPtr.IsValid()) {
+        m_msgPtr->SetMessage(error, icon);
     }
 }

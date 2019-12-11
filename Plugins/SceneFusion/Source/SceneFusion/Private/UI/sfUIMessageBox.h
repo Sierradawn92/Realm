@@ -6,7 +6,6 @@
 #include <Widgets/Images/SImage.h>
 #include <Widgets/Layout/SBorder.h>
 #include <Widgets/SBoxPanel.h>
-#include <Widgets/Input/SButton.h>
 
 /**
  * Display a message bow with an error, warning, or info icon.
@@ -19,8 +18,6 @@ public:
 
 public:
     enum Icon { INFO, WARNING, ERROR };
-
-    DECLARE_DELEGATE(OnClickDelegate);
 
     /**
      * Construct the widget
@@ -43,17 +40,6 @@ public:
             .WrapTextAt(300)
             .Justification(ETextJustify::Left)
             .Text(FText::FromString("Test Message"))
-        ]
-        + SHorizontalBox::Slot().HAlign(HAlign_Right).VAlign(VAlign_Center).Padding(5, 5).AutoWidth()
-        [
-            SAssignNew(m_buttonPtr, SButton)
-            .Text(FText::FromString("Details"))
-            .Visibility(EVisibility::Collapsed)
-            .OnClicked(FOnClicked::CreateLambda([this]()->FReply
-            {
-                m_onClick.ExecuteIfBound();
-                return FReply::Handled();
-            }))
         ];
     }
 
@@ -62,10 +48,8 @@ public:
      *
      * @param   const FString& - message
      * @param   MessageType
-     * @param   OnClickDelegate onClick - if provided, a details button will be shown that will call this function
-     *          when clicked.
      */
-    void SetMessage(const FString& message, Icon type, OnClickDelegate onClick = nullptr)
+    void SetMessage(const FString& message, Icon type)
     {
         if (message.IsEmpty()) {
             SetVisibility(EVisibility::Hidden);
@@ -80,16 +64,10 @@ public:
                 case ERROR: m_imagePtr->SetImage(sfUIStyles::Get().GetBrush("SceneFusion.Error")); break;
                 default: m_imagePtr->SetImage(sfUIStyles::Get().GetBrush("SceneFusion.Info")); break;
             }
-            m_onClick = onClick;
-            m_buttonPtr->SetVisibility(onClick.IsBound() ? EVisibility::Visible: EVisibility::Collapsed);
         }
     }
-
 private:
     TSharedPtr<SImage> m_imagePtr;
     TSharedPtr<STextBlock> m_textPtr;
     TSharedPtr<SWidget> m_widgetPtr;
-    TSharedPtr<SButton> m_buttonPtr;
-
-    OnClickDelegate m_onClick;
 };

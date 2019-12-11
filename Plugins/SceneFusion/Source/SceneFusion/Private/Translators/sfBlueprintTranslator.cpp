@@ -186,7 +186,6 @@ void sfBlueprintTranslator::OnCreateBlueprint(sfObject::SPtr objPtr)
     GIsSlowTask = false;
     if (blueprintPtr == nullptr)
     {
-        SceneFusion::MissingObjectManager->AddMissingObject(name, objPtr);
         KS::Log::Warning("Could not find blueprint " + sfUnrealUtils::FToStdString(name), LOG_CHANNEL);
         return;
     }

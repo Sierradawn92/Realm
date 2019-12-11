@@ -12,19 +12,6 @@
  */
 class sfModelTranslator : public sfBaseTranslator
 {
-public:
-    /**
-     * Constructor
-     */
-    sfModelTranslator();
-
-    /**
-     * Marks a level as needing its BSP rebuilt, and resets a timer to rebuild BSP.
-     *
-     * @param   ULevel* levelPtr whose BSP needs to be rebuilt.
-     */
-    void MarkBSPStale(ULevel* levelPtr);
-
 protected:
     /**
      * Initialization. Called after connecting to a session.
@@ -72,10 +59,8 @@ private:
     std::unordered_set<sfObject::SPtr> m_staleModels;
     std::unordered_set<sfObject::SPtr> m_rebuiltModels;
     float m_checkChangeTimer;
-    float m_bspRebuildDelay;
     FDelegateHandle m_onDeselectHandle;
     FDelegateHandle m_onLevelDirtiedHandle;
-    FDelegateHandle m_onLockHandle;
     FDelegateHandle m_tickHandle;
 
     /**
@@ -119,23 +104,6 @@ private:
      * Called when a level is dirtied. Checks for changes to the selected brush's surface alignment.
      */
     void OnLevelDirtied();
-
-    /**
-     * Called when the lock state of an actor changes. If the actor is a brush that became locked, finds or creates a
-     * mesh for the brush's model to use for rendering the lock shader.
-     *
-     * @param   AActor* actorPtr whose lock state changed.
-     * @param   sfActorTranslator::LockType lockType
-     * @param   sfUser::SPtr userPtr who owns the lock. nullptr if the actor is partially locked.
-     */
-    void OnLockChange(AActor* actorPtr, sfActorTranslator::LockType lockType, sfUser::SPtr userPtr);
-
-    /**
-     * Decreases the rebuild bsp timer and rebuilds bsp if it reaches 0.
-     *
-     * @param   deltaTime in seconds since the last tick.
-     */
-    void RebuildBSPIfNeeded(float deltaTime);
 
     /**
      * Serializes or deserializes a model.

@@ -12,7 +12,6 @@
 #include "../sfActorUtil.h"
 #include "../sfUnrealUtils.h"
 #include "../sfConfig.h"
-#include "../sfSelectionManager.h"
 #include <sfDictionaryProperty.h>
 #include <Editor.h>
 #include <LandscapeHeightfieldCollisionComponent.h>
@@ -41,8 +40,6 @@ void sfComponentTranslator::Initialize()
     m_sessionPtr = SceneFusion::Service->Session();
     m_actorTranslatorPtr = SceneFusion::Get().GetTranslator<sfActorTranslator>(sfType::Actor);
     m_tickHandle = SceneFusion::Get().OnTick.AddRaw(this, &sfComponentTranslator::Tick);
-    m_onDeselectHandle = sfSelectionManager::Get().OnDeselect.AddRaw(this, &sfComponentTranslator::SyncComponents);
-    m_onMoveHandle = sfSelectionManager::Get().OnMove.AddRaw(this, &sfComponentTranslator::SyncComponentTransforms);
     m_onApplyObjectToActorHandle
         = FEditorDelegates::OnApplyObjectToActor.AddRaw(this, &sfComponentTranslator::OnApplyObjectToActor);
 }
@@ -50,8 +47,6 @@ void sfComponentTranslator::Initialize()
 void sfComponentTranslator::CleanUp()
 {
     SceneFusion::Get().OnTick.Remove(m_tickHandle);
-    sfSelectionManager::Get().OnDeselect.Remove(m_onDeselectHandle);
-    sfSelectionManager::Get().OnMove.Remove(m_onMoveHandle);
     FEditorDelegates::OnApplyObjectToActor.Remove(m_onApplyObjectToActorHandle);
     m_syncComponentsList.Empty();
     m_transformChangedSet.Empty();
@@ -59,17 +54,13 @@ void sfComponentTranslator::CleanUp()
 
 void sfComponentTranslator::Tick(float deltaTime)
 {
-    for (AActor* actorPtr : sfSelectionManager::Get().SelectedActors())
-    {
-        SyncComponents(actorPtr);
-    }
     if (m_syncComponentsList.Num() > 0)
     {
         TArray<AActor*> actors = std::move(m_syncComponentsList.Array());
         m_syncComponentsList.Empty();
         for (AActor* actorPtr : actors)
         {
-            SyncComponents(actorPtr);
+            SyncComponents(actorPtr, sfObjectMap::GetSFObject(actorPtr));
         }
     }
     if (m_transformChangedSet.Num() > 0)
@@ -122,9 +113,8 @@ bool sfComponentTranslator::IsSyncable(UActorComponent* componentPtr, bool allow
     return true;
 }
 
-void sfComponentTranslator::SyncComponents(AActor* actorPtr)
+void sfComponentTranslator::SyncComponents(AActor* actorPtr, sfObject::SPtr actorObjPtr)
 {
-    sfObject::SPtr actorObjPtr = sfObjectMap::GetSFObject(actorPtr);
     if (actorObjPtr == nullptr)
     {
         return;
@@ -327,7 +317,6 @@ void sfComponentTranslator::SyncParent(AActor* actorPtr, UActorComponent* compon
             if (actorPtr->GetRootComponent() == componentPtr)
             {
                 objPtr->Property()->AsDict()->Set(sfProp::IsRoot, sfValueProperty::Create(true));
-#if ENGINE_MAJOR_VERSION <= 4 && ENGINE_MINOR_VERSION <= 22
                 // Unreal has a bug where if you change the root component of a child actor, the actor is no longer
                 // attached to the parent but it appears to be in the World Outliner, so we attach it back.
                 USceneComponent* parentCompPtr = sfObjectMap::Get<USceneComponent>(parentPtr->Parent());
@@ -337,7 +326,6 @@ void sfComponentTranslator::SyncParent(AActor* actorPtr, UActorComponent* compon
                     sceneComponentPtr->AttachToComponent(parentCompPtr, FAttachmentTransformRules::KeepWorldTransform);
                     m_actorTranslatorPtr->EnableParentChangeHandler();
                 }
-#endif
             }
             else if (objPtr->Parent()->Type() == sfType::Actor)
             {
@@ -927,6 +915,10 @@ void sfComponentTranslator::RegisterPropertyChangeHandlers()
         m_transformChangedSet.Add(componentPtr);
         AActor* actorPtr = componentPtr->GetOwner();
         actorPtr->InvalidateLightingCache();
+        if (actorPtr->IsA<ABrush>())
+        {
+            m_actorTranslatorPtr->MarkBSPStale(actorPtr->GetLevel());
+        }
     });
     RegisterPostPropertyChangeHandler<USceneComponent>(FName(sfProp::Rotation->c_str()), [this](UObject* uobjPtr)
     {
@@ -935,6 +927,10 @@ void sfComponentTranslator::RegisterPropertyChangeHandlers()
         m_transformChangedSet.Add(componentPtr);
         AActor* actorPtr = componentPtr->GetOwner();
         actorPtr->InvalidateLightingCache();
+        if (actorPtr->IsA<ABrush>())
+        {
+            m_actorTranslatorPtr->MarkBSPStale(actorPtr->GetLevel());
+        }
     });
     RegisterPostPropertyChangeHandler<USceneComponent>(FName(sfProp::Scale->c_str()), [this](UObject* uobjPtr)
     {
@@ -943,6 +939,10 @@ void sfComponentTranslator::RegisterPropertyChangeHandlers()
         m_transformChangedSet.Add(componentPtr);
         AActor* actorPtr = componentPtr->GetOwner();
         actorPtr->InvalidateLightingCache();
+        if (actorPtr->IsA<ABrush>())
+        {
+            m_actorTranslatorPtr->MarkBSPStale(actorPtr->GetLevel());
+        }
     });
     RegisterPostPropertyChangeHandler<UInstancedStaticMeshComponent>("PerInstanceSMData", [this](UObject* uobjPtr)
     {
@@ -1009,16 +1009,6 @@ void sfComponentTranslator::SyncTransform(USceneComponent* componentPtr, bool ap
     sfPropertyManager::Get().SyncProperty(objPtr, componentPtr, FName(sfProp::Location->c_str()), applyServerValues);
     sfPropertyManager::Get().SyncProperty(objPtr, componentPtr, FName(sfProp::Rotation->c_str()), applyServerValues);
     sfPropertyManager::Get().SyncProperty(objPtr, componentPtr, FName(sfProp::Scale->c_str()), applyServerValues);
-}
-
-void sfComponentTranslator::SyncComponentTransforms(AActor* actorPtr)
-{
-    TArray<USceneComponent*> sceneComponents;
-    actorPtr->GetComponents(sceneComponents);
-    for (USceneComponent* componentPtr : sceneComponents)
-    {
-        SyncTransform(componentPtr);
-    }
 }
 
 void sfComponentTranslator::OnPropertyChange(sfProperty::SPtr propertyPtr)

@@ -38,35 +38,9 @@ public:
     DECLARE_MULTICAST_DELEGATE_OneParam(OnCreateMissingAssetDelegate, UObject*);
 
     /**
-     * Delegate for on create stand-in.
-     *
-     * @param   const FString& path to missing asset the stand-in was created for.
-     * @param   UObject* stand-in
-     */
-    DECLARE_MULTICAST_DELEGATE_TwoParams(OnCreateStandInDelegate, const FString&, UObject*);
-
-    /**
-     * Delegate for on replace stand-in.
-     *
-     * @param   const FString& path to asset that replaced the stand-in.
-     * @param   UObject* stand-in that was replaced.
-     */
-    DECLARE_MULTICAST_DELEGATE_TwoParams(OnReplaceStandInDelegate, const FString&, UObject*);
-
-    /**
      * Invoked when the loader creates a missing asset.
      */
     OnCreateMissingAssetDelegate OnCreateMissingAsset;
-
-    /**
-     * Invoked when a stand-in is created for a missing asset.
-     */
-    OnCreateStandInDelegate OnCreateStandIn;
-
-    /**
-     * Invoked when a new asset replaces a stand-in.
-     */
-    OnReplaceStandInDelegate OnReplaceStandIn;
 
     /**
      * @return  sfLoader& singleton instance.

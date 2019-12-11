@@ -1,6 +1,5 @@
 #include "sfMissingObjectManager.h"
 #include "sfUnrealUtils.h"
-#include "../Public/SceneFusion.h"
 #include <Developer/HotReload/Public/IHotReload.h>
 
 void sfMissingObjectManager::Initialize()
@@ -21,24 +20,20 @@ void sfMissingObjectManager::AddStandIn(IsfMissingObject* standInPtr)
 {
     TArray<IsfMissingObject*>& standIns = m_standInMap.FindOrAdd(standInPtr->MissingClass());
     standIns.Add(standInPtr);
-    if (standIns.Num() == 1)
-    {
-        OnMissingAsset.Broadcast(standInPtr->MissingClass());
-    }
 }
 
 void sfMissingObjectManager::RemoveStandIn(IsfMissingObject* standInPtr)
 {
     TArray<IsfMissingObject*>* standInsPtr = m_standInMap.Find(standInPtr->MissingClass());
-    if (standInsPtr != nullptr)
+    if (standInsPtr == nullptr)
     {
-        standInsPtr->Remove(standInPtr);
+        return;
     }
-}
-
-void sfMissingObjectManager::AddMissingObject(const FString& path, sfObject::SPtr objPtr)
-{
-    m_missingObjects.Add(path, objPtr);
+    standInsPtr->Remove(standInPtr);
+    if (standInsPtr->Num() == 0)
+    {
+        m_standInMap.Remove(standInPtr->MissingClass());
+    }
 }
 
 void sfMissingObjectManager::OnHotReload(bool automatic)
@@ -70,14 +65,6 @@ void sfMissingObjectManager::OnNewAsset(const FAssetData& assetData)
     {
         path = path.Left(index);
     }
-
-    // Redispatch the create event for the object for this asset
-    sfObject::SPtr objPtr;
-    if (m_missingObjects.RemoveAndCopyValue(path, objPtr))
-    {
-        SceneFusion::ObjectEventDispatcher->OnCreate(objPtr, 0);
-    }
-
     TArray<IsfMissingObject*> standIns;
     if (!m_standInMap.RemoveAndCopyValue(path, standIns))
     {
@@ -87,5 +74,4 @@ void sfMissingObjectManager::OnNewAsset(const FAssetData& assetData)
     {
         standInPtr->Reload();
     }
-    OnFoundMissingAsset.Broadcast(path);
 }

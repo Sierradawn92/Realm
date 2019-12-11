@@ -7,7 +7,6 @@
 #include "../Actors/sfMissingActor.h"
 #include "../sfPropertyUtil.h"
 #include "../sfPropertyManager.h"
-#include "../sfSelectionManager.h"
 #include "../sfActorUtil.h"
 #include "../../Public/SceneFusion.h"
 #include "../sfObjectMap.h"
@@ -32,19 +31,25 @@
 #include <LevelEditorViewport.h>
 #include <UObject/GarbageCollection.h>
 #include <Landscape.h>
+#include <Engine/Brush.h>
 #include <Engine/Polys.h>
 #include <Model.h>
+#include <Components/BrushComponent.h>
+#include <Engine/BrushBuilder.h>
 #include <LandscapeGizmoActiveActor.h>
 #include <Components/SplineMeshComponent.h>
 #include <Components/InstancedStaticMeshComponent.h>
 #include <LandscapeStreamingProxy.h>
 
+// In seconds
+#define BSP_REBUILD_DELAY .2f;
 #define LOG_CHANNEL "sfActorTranslator"
 
 sfActorTranslator::sfActorTranslator()
 {
     RegisterPropertyChangeHandlers();
-    
+    sfPropertyManager::Get().AddPropertyToForceSyncList("Brush", "BrushBuilder");
+    sfPropertyManager::Get().AddPropertyToForceSyncList("Brush", "PolyFlags");
 }
 
 sfActorTranslator::~sfActorTranslator()
@@ -62,10 +67,20 @@ void sfActorTranslator::Initialize()
     m_onActorDetachedHandle = GEngine->OnLevelActorDetached().AddRaw(this, &sfActorTranslator::OnAttachDetach);
     m_onFolderChangeHandle = GEngine->OnLevelActorFolderChanged().AddRaw(this, &sfActorTranslator::OnFolderChange);
     m_onLabelChangeHandle = FCoreDelegates::OnActorLabelChanged.AddRaw(this, &sfActorTranslator::OnLabelChanged);
-    m_onSelectHandle = sfSelectionManager::Get().OnSelect.AddRaw(this, &sfActorTranslator::OnSelect);
-    m_onDeselectHandle = sfSelectionManager::Get().OnDeselect.AddRaw(this, &sfActorTranslator::OnDeselect);
+    m_onLevelDirtiedHandle = ULevel::LevelDirtiedEvent.AddRaw(this, &sfActorTranslator::OnLevelDirtied);
+    m_onMoveStartHandle = GEditor->OnBeginObjectMovement().AddRaw(this, &sfActorTranslator::OnMoveStart);
+    m_onMoveEndHandle = GEditor->OnEndObjectMovement().AddRaw(this, &sfActorTranslator::OnMoveEnd);
+    m_onActorMovedHandle = GEditor->OnActorMoved().AddRaw(this, &sfActorTranslator::OnActorMoved);
     m_numSyncedActors = 0;
+    m_movingActors = false;
+    m_movingBrush = false;
     m_collectGarbage = false;
+    m_bspRebuildDelay = -1.0f;
+
+    sfObjectMap::RegisterRemoveHandler<ABrush>([](sfObject::SPtr objPtr, UObject* uobjPtr)
+    {
+        UsfLockComponent::DestroyModelMesh(Cast<ABrush>(uobjPtr));
+    });
 }
 
 void sfActorTranslator::CleanUp()
@@ -77,8 +92,10 @@ void sfActorTranslator::CleanUp()
     GEngine->OnLevelActorDetached().Remove(m_onActorDetachedHandle);
     GEngine->OnLevelActorFolderChanged().Remove(m_onFolderChangeHandle);
     FCoreDelegates::OnActorLabelChanged.Remove(m_onLabelChangeHandle);
-    sfSelectionManager::Get().OnSelect.Remove(m_onSelectHandle);
-    sfSelectionManager::Get().OnDeselect.Remove(m_onDeselectHandle);
+    ULevel::LevelDirtiedEvent.Remove(m_onLevelDirtiedHandle);
+    GEditor->OnBeginObjectMovement().Remove(m_onMoveStartHandle);
+    GEditor->OnEndObjectMovement().Remove(m_onMoveEndHandle);
+    GEditor->OnActorMoved().Remove(m_onActorMovedHandle);
 
     UWorld* world = GEditor->GetEditorWorldContext().World();
     for (TActorIterator<AActor> iter(world); iter; ++iter)
@@ -99,6 +116,8 @@ void sfActorTranslator::CleanUp()
     m_revertFolderQueue.Empty();
     m_syncParentList.Empty();
     m_foldersToCheck.Empty();
+    m_selectedActors.clear();
+    m_movedActors.Empty();
 }
 
 void sfActorTranslator::Tick(float deltaTime)
@@ -108,6 +127,16 @@ void sfActorTranslator::Tick(float deltaTime)
     {
         UploadActors(m_uploadList);
     }
+
+    // Check for selection changes and request locks/unlocks
+    UpdateSelection();
+
+    // Send actor transform changes for moved actors
+    for (AActor* actorPtr : m_movedActors)
+    {
+        SyncComponentTransforms(actorPtr);
+    }
+    m_movedActors.Empty();
 
     // Revert folders to server values for actors whose folder changed while locked
     if (!m_revertFolderQueue.IsEmpty())
@@ -147,10 +176,69 @@ void sfActorTranslator::Tick(float deltaTime)
         m_collectGarbage = false;
         CollectGarbage(GARBAGE_COLLECTION_KEEPFLAGS);
     }
+
+    // Rebuild BSP
+    RebuildBSPIfNeeded(deltaTime);
+}
+
+void sfActorTranslator::UpdateSelection()
+{
+    TSet<AActor*> selectedActors;
+    sfDetailsPanelManager::Get().GetSelectedActors(selectedActors);
+    // Unreal doesn't have deselect events and doesn't fire select events when selecting through the World Outliner so
+    // we have to iterate the selection to check for changes
+    TSharedPtr<sfComponentTranslator> componentTranslatorPtr
+        = SceneFusion::Get().GetTranslator<sfComponentTranslator>(sfType::Component);
+    for (auto iter = m_selectedActors.cbegin(); iter != m_selectedActors.cend();)
+    {
+        if (m_movingActors)
+        {
+            SyncComponentTransforms(iter->first);
+            m_movedActors.Remove(iter->first);
+        }
+        if (componentTranslatorPtr.IsValid())
+        {
+            componentTranslatorPtr->SyncComponents(iter->first, iter->second);
+        }
+        if (!selectedActors.Contains(iter->first))
+        {
+            OnDeselect.Broadcast(iter->first);
+            iter->second->ReleaseLock();
+            m_selectedActors.erase(iter++);
+        }
+        else
+        {
+            ++iter;
+        }
+    }
+
+    for (AActor* actorPtr : selectedActors)
+    {
+        if (m_selectedActors.find(actorPtr) != m_selectedActors.end())
+        {
+            continue;
+        }
+        sfObject::SPtr objPtr = sfObjectMap::GetSFObject(actorPtr);
+        if (objPtr != nullptr && objPtr->IsSyncing())
+        {
+            objPtr->RequestLock();
+            m_selectedActors[actorPtr] = objPtr;
+            if (m_movingActors)
+            {
+                sfLoader::Get().LoadAssetsFor(objPtr);
+            }
+        }
+    }
 }
 
 void sfActorTranslator::DestroyActor(AActor* actorPtr)
 {
+    ABrush* brushPtr = Cast<ABrush>(actorPtr);
+    if (brushPtr != nullptr)
+    {
+        m_bspRebuildDelay = BSP_REBUILD_DELAY;
+        UsfLockComponent::DestroyModelMesh(brushPtr);
+    }
     if (actorPtr->IsSelected())
     {
         // Unselect the actor before deleting it to avoid UI bugs/crashes
@@ -263,6 +351,36 @@ void sfActorTranslator::DeleteEmptyFolders()
         }
         m_foldersToCheck.Empty();
     }
+}
+
+void sfActorTranslator::RebuildBSPIfNeeded(float deltaTime)
+{
+    if (m_bspRebuildDelay >= 0.0f)
+    {
+        if (m_movingBrush)
+        {
+            // If we rebuild bsp while moving a brush, it will interfere with the brush movement. The bsp will get
+            // rebuilt automatically when we stop moving the brush so we don't have to do anything.
+            m_bspRebuildDelay = 0;
+        }
+        else
+        {
+            m_bspRebuildDelay -= deltaTime;
+            if (m_bspRebuildDelay < 0.0f)
+            {
+                SceneFusion::ObjectEventDispatcher->DisableOnUObjectModified();
+                SceneFusion::RedrawActiveViewport();
+                GEditor->RebuildAlteredBSP();
+                SceneFusion::ObjectEventDispatcher->EnableOnUObjectModified();
+            }
+        }
+    }
+}
+
+void sfActorTranslator::MarkBSPStale(ULevel* levelPtr)
+{
+    ABrush::SetNeedRebuild(levelPtr);
+    m_bspRebuildDelay = BSP_REBUILD_DELAY;
 }
 
 bool sfActorTranslator::IsSyncable(AActor* actorPtr, bool allowPendingKill)
@@ -509,6 +627,7 @@ sfObject::SPtr sfActorTranslator::CreateObject(AActor* actorPtr)
     if (actorPtr->IsSelected())
     {
         objPtr->RequestLock();
+        m_selectedActors[actorPtr] = objPtr;
     }
 
     FString className;
@@ -730,6 +849,7 @@ AActor* sfActorTranslator::InitializeActor(sfObject::SPtr objPtr, ULevel* levelP
         if (actorPtr->IsSelected())
         {
             objPtr->RequestLock();
+            m_selectedActors[actorPtr] = objPtr;
         }
     }
     sfObjectMap::Add(objPtr, actorPtr);
@@ -819,9 +939,20 @@ void sfActorTranslator::OnActorDeleted(AActor* actorPtr)
             levelTranslatorPtr->MarkActorOrderStale(actorPtr->GetLevel());
         }
     }
+    ABrush* brushPtr = Cast<ABrush>(actorPtr);
+    if (brushPtr != nullptr)
+    {
+        UsfLockComponent::DestroyModelMesh(brushPtr);
+    }
     actorPtr->ClearFlags(RF_Standalone);// allow the actor to be garbage collected
     m_uploadList.Remove(actorPtr);
-    sfSelectionManager::Get().RemoveActor(actorPtr);
+    m_selectedActors.erase(actorPtr);
+    if (m_selectedActors.size() == 0)
+    {
+        m_movingActors = false;
+        m_movingBrush = false;
+    }
+    m_movedActors.Remove(actorPtr);
 }
 
 void sfActorTranslator::CleanUpChildrenOfDeletedObject(sfObject::SPtr objPtr, sfObject::SPtr levelObjPtr,
@@ -973,6 +1104,10 @@ void sfActorTranslator::Lock(AActor* actorPtr, sfObject::SPtr objPtr)
     lockPtr->AttachToComponent(actorPtr->GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
     lockPtr->RegisterComponent();
     lockPtr->InitializeComponent();
+    if (lockMaterialPtr != nullptr && actorPtr->IsA<ABrush>())
+    {
+        lockPtr->CreateOrFindModelMesh(lockMaterialPtr);
+    }
 }
 
 void sfActorTranslator::OnUnlock(sfObject::SPtr objPtr)
@@ -1103,25 +1238,47 @@ void sfActorTranslator::OnFolderChange(const AActor* actorPtr, FName oldFolder)
     }
 }
 
-void sfActorTranslator::OnSelect(AActor* actorPtr)
+void sfActorTranslator::OnMoveStart(UObject& uobj)
 {
-    sfObject::SPtr objPtr = sfObjectMap::GetSFObject(actorPtr);
-    if (objPtr != nullptr)
+    m_movingActors = GCurrentLevelEditingViewportClient &&
+        GCurrentLevelEditingViewportClient->bWidgetAxisControlledByDrag;
+    m_movingBrush = m_movingActors && uobj.IsA<ABrush>();
+}
+
+void sfActorTranslator::OnMoveEnd(UObject& uobj)
+{
+    m_movingActors = false;
+    m_movingBrush = false;
+    for (auto iter : m_selectedActors)
     {
-        objPtr->RequestLock();
-        if (!sfSelectionManager::Get().MovingActors())
-        {
-            sfLoader::Get().LoadAssetsFor(objPtr);
-        }
+        SyncComponentTransforms(iter.first);
     }
 }
 
-void sfActorTranslator::OnDeselect(AActor* actorPtr)
+void sfActorTranslator::OnActorMoved(AActor* actorPtr)
 {
     sfObject::SPtr objPtr = sfObjectMap::GetSFObject(actorPtr);
-    if (objPtr != nullptr)
+    if (sfPropertyManager::Get().ListeningForPropertyChanges() &&
+        actorPtr->GetWorld() == GEditor->GetEditorWorldContext().World() &&
+        objPtr != nullptr && objPtr->IsSyncing())
     {
-        objPtr->ReleaseLock();
+        m_movedActors.Add(actorPtr);
+    }
+}
+
+void sfActorTranslator::SyncComponentTransforms(AActor* actorPtr)
+{
+    TSharedPtr<sfComponentTranslator> componentTranslatorPtr
+        = SceneFusion::Get().GetTranslator<sfComponentTranslator>(sfType::Component);
+    if (!componentTranslatorPtr.IsValid())
+    {
+        return;
+    }
+    TArray<USceneComponent*> sceneComponents;
+    actorPtr->GetComponents(sceneComponents);
+    for (USceneComponent* componentPtr : sceneComponents)
+    {
+        componentTranslatorPtr->SyncTransform(componentPtr);
     }
 }
 
@@ -1337,6 +1494,24 @@ void sfActorTranslator::OnLabelChanged(AActor* actorPtr)
     SyncLabelAndName(actorPtr, objPtr, objPtr->Property()->AsDict());
 }
 
+void sfActorTranslator::OnLevelDirtied()
+{
+    if (sfUndoManager::Get().GetUndoText() != "SetBrushProperties")
+    {
+        return;
+    }
+    TSet<AActor*> selectedActors;
+    sfDetailsPanelManager::Get().GetSelectedActors(selectedActors);
+    for (AActor* actorPtr : selectedActors)
+    {
+        ABrush* brushPtr = Cast<ABrush>(actorPtr);
+        if (brushPtr != nullptr)
+        {
+            sfPropertyManager::Get().SyncProperty(sfObjectMap::GetSFObject(brushPtr), brushPtr, "PolyFlags");
+        }
+    }
+}
+
 void sfActorTranslator::RegisterPropertyChangeHandlers()
 {
     m_propertyChangeHandlers[sfProp::Name] = 
@@ -1365,6 +1540,22 @@ void sfActorTranslator::RegisterPropertyChangeHandlers()
         m_onFolderChangeHandle = GEngine->OnLevelActorFolderChanged().AddRaw(this, &sfActorTranslator::OnFolderChange);
         return true;
     };
+    RegisterPostPropertyChangeHandler<ABrush>("BrushType", [this](UObject* uobjPtr)
+    {
+        ABrush* brushPtr = Cast<ABrush>(uobjPtr);
+        if (brushPtr != nullptr)
+        {
+            MarkBSPStale(brushPtr->GetLevel());
+        }
+    });
+    RegisterPostPropertyChangeHandler<ABrush>("PolyFlags", [this](UObject* uobjPtr)
+    {
+        ABrush* brushPtr = Cast<ABrush>(uobjPtr);
+        if (brushPtr != nullptr)
+        {
+            MarkBSPStale(brushPtr->GetLevel());
+        }
+    });
 }
 
 void sfActorTranslator::InvokeOnLockStateChange(sfObject::SPtr objPtr, AActor* actorPtr)
@@ -1388,6 +1579,7 @@ void sfActorTranslator::ClearActorCollections()
         actorPtr->ClearFlags(RF_Standalone); // allow the actor to be garbage collected
     }
     m_uploadList.Empty();
+    m_movedActors.Empty();
     m_revertFolderQueue.Empty();
     m_syncParentList.Empty();
 }
@@ -1403,7 +1595,8 @@ void sfActorTranslator::OnRemoveLevel(sfObject::SPtr levelObjPtr, ULevel* levelP
             if (actorPtr != nullptr)
             {
                 m_numSyncedActors--;
-                sfSelectionManager::Get().RemoveActor(actorPtr);
+                m_selectedActors.erase(actorPtr);
+                m_movedActors.Remove(actorPtr);
             }
             return true;
         });
@@ -1458,4 +1651,5 @@ void sfActorTranslator::LogNoParentErrorAndDisconnect(sfObject::SPtr objPtr)
     SceneFusion::Service->LeaveSession();
 }
 
+#undef BSP_REBUILD_DELAY
 #undef LOG_CHANNEL

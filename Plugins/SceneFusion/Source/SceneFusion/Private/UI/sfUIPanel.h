@@ -56,20 +56,9 @@ public:
      * Display a message at the bottom of this panel.
      *
      * @param   const FString& - message
-     * @param   sfUIMessageBox::Icon - message icon (INFO, ERROR, WARNING)
-     * @param   sfUIMessageBox::OnClicDelegate - if provided, will show a "Details" button that calls this function
-     *          when clicked.
+     * @param   fUIMessageBox::Icon - message icon (INFO, ERROR, WARNING)
      */
-    virtual void DisplayMessage(
-        const FString& error,
-        sfUIMessageBox::Icon icon, 
-        sfUIMessageBox::OnClickDelegate onClick = nullptr);
-
-    /**
-     * Clears the message at the bottom of this panel.
-     */
-    virtual void ClearMessage();
-
+    virtual void DisplayMessage(const FString& error, sfUIMessageBox::Icon icon);
 protected:
     TSharedPtr<SScrollBox> m_widgetPtr;
     TSharedPtr<STextBlock> m_titlePtr;

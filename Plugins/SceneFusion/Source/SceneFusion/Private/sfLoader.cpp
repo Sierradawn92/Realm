@@ -201,7 +201,6 @@ UObject* sfLoader::Load(const FString& path, const FString& className)
     }
 
     m_standIns.Add(path, standInPtr);
-    OnCreateStandIn.Broadcast(path, standInPtr);
 
     return standInPtr;
 }
@@ -349,7 +348,6 @@ void sfLoader::OnNewAsset(const FAssetData& assetData)
     KS::Log::Debug("New asset found for stand-in '" + std::string(TCHAR_TO_UTF8(*path)) + "'.", LOG_CHANNEL);
     standInPtr->ClearFlags(RF_Standalone);// Allow Unreal to destroy the stand-in 
     m_standInsToReplace.Add(standInPtr);
-    OnReplaceStandIn.Broadcast(path, standInPtr);
     // Wait .1 seconds to see if more assets are created that we can swap in all at once.
     m_replaceTimer = 0.1f;
 }
@@ -384,7 +382,7 @@ void sfLoader::ReplaceStandIns()
                 // Replace the stand-in by triggering a property change event for the property
                 if (valuePtr->Key().IsValid() && valuePtr->Key()->size() > 0 && (*valuePtr->Key())[0] == '#')
                 {
-                    // If the property starts with '#' it is one of our custom properties. Call the object event
+                    // If the property starts with '#' it is one of or custom properties. Call the object event
                     // dispatcher to run the appropriate property change handler.
                     SceneFusion::ObjectEventDispatcher->OnPropertyChange(valuePtr);
                 }

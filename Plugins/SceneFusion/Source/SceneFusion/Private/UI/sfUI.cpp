@@ -5,7 +5,6 @@
 #include "../../Public/SceneFusion.h"
 #include "../sfConfig.h"
 #include "../Translators/sfActorTranslator.h"
-#include "../sfLoader.h"
 
 #include <iostream>
 
@@ -23,7 +22,6 @@ using namespace KS;
 using namespace KS::SceneFusion2;
 
 static const FName SceneFusionTabName("Scene Fusion");
-static const FName MissingAssetsTabName("SF Missing Assets");
 
 void sfUI::Initialize()
 {
@@ -34,8 +32,6 @@ void sfUI::Initialize()
     ExtendToolBar();
     RegisterSFTab();
     RegisterSFHandlers();
-
-    m_missingAssetsPanel.RefreshMessageBox();
 
     m_outlinerManagerPtr = MakeShareable(new sfOutlinerManager);
     TSharedPtr<sfActorTranslator> actorTranslatorPtr = SceneFusion::Get().GetTranslator<sfActorTranslator>(
@@ -58,7 +54,6 @@ void sfUI::Cleanup()
     sfUIStyles::Shutdown();
     sfUICommands::Unregister();
     FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(SceneFusionTabName);
-    FGlobalTabmanager::Get()->UnregisterNomadTabSpawner(MissingAssetsTabName);
 }
 
 void sfUI::InitializeStyles()
@@ -76,11 +71,6 @@ void sfUI::InitializeCommands()
     m_UICommandListPtr->MapAction(
         sfUICommands::Get().ToolBarClickPtr,
         FExecuteAction::CreateLambda([this]() { FGlobalTabmanager::Get()->InvokeTab(SceneFusionTabName); }),
-        FCanExecuteAction()
-    );
-    m_UICommandListPtr->MapAction(
-        sfUICommands::Get().MissingAssetsPtr,
-        FExecuteAction::CreateLambda([this]() { FGlobalTabmanager::Get()->InvokeTab(MissingAssetsTabName); }),
         FCanExecuteAction()
     );
 }
@@ -107,11 +97,6 @@ void sfUI::RegisterSFTab()
     );
     tabSpawner.SetDisplayName(FText::FromString(TEXT("Scene Fusion")));
     tabSpawner.SetMenuType(ETabSpawnerMenuType::Hidden);
-
-    FTabSpawnerEntry& tabSpawner2 = FGlobalTabmanager::Get()->RegisterNomadTabSpawner(
-        MissingAssetsTabName,
-        FOnSpawnTab::CreateRaw(this, &sfUI::OnCreateMissingAssetsTab)
-    );
 }
 
 void sfUI::RegisterSFHandlers()
@@ -227,40 +212,10 @@ void sfUI::OnConnectComplete(sfSession::SPtr sessionPtr, const std::string& erro
             [this](sfUser::SPtr value) { m_onlinePanel.UpdateUserColor(std::move(value)); }
         );
 
-        m_onCreateStandInHandle = sfLoader::Get().OnCreateStandIn.AddLambda(
-            [this](const FString& path, UObject* standInPtr)
-        {
-            m_missingAssetsPanel.AddMissingPath(path);
-            RefreshMissingAssetsWarning();
-        });
-
-        m_onReplaceStandInHandle = sfLoader::Get().OnReplaceStandIn.AddLambda(
-            [this](const FString& path, UObject* standInPtr)
-        {
-            m_missingAssetsPanel.RemoveMissingPath(path);
-            RefreshMissingAssetsWarning();
-        });
-
-        m_onMissingAssetHandle = SceneFusion::MissingObjectManager->OnMissingAsset.AddLambda(
-            [this](const FString& path)
-        {
-            m_missingAssetsPanel.AddMissingPath(path);
-            RefreshMissingAssetsWarning();
-        });
-
-        m_onFoundAssetHandle = SceneFusion::MissingObjectManager->OnFoundMissingAsset.AddLambda(
-            [this](const FString& path)
-        {
-            m_missingAssetsPanel.RemoveMissingPath(path);
-            RefreshMissingAssetsWarning();
-        });
-
         ShowOnlinePanel();
         SceneFusion::Get().OnConnect();
         m_outlinerManagerPtr->Initialize();
         sfDetailsPanelManager::Get().Initialize();
-        m_missingAssetsPanel.Clear();
-        RefreshMissingAssetsWarning();
     }
     else if (!errorMessage.empty())
     {
@@ -273,10 +228,6 @@ void sfUI::OnDisconnect(sfSession::SPtr sessionPtr, const std::string& errorMess
     sessionPtr->UnregisterOnUserJoinHandler(m_userJoinEventPtr);
     sessionPtr->UnregisterOnUserLeaveHandler(m_userLeaveEventPtr);
     sessionPtr->UnregisterOnUserColorChangeHandler(m_userColorChangeEventPtr);
-    sfLoader::Get().OnCreateStandIn.Remove(m_onCreateStandInHandle);
-    sfLoader::Get().OnReplaceStandIn.Remove(m_onReplaceStandInHandle);
-    SceneFusion::MissingObjectManager->OnMissingAsset.Remove(m_onMissingAssetHandle);
-    SceneFusion::MissingObjectManager->OnFoundMissingAsset.Remove(m_onFoundAssetHandle);
 
     ShowSessionsPanel();
     m_onlinePanel.ClearUsers();
@@ -289,46 +240,21 @@ void sfUI::OnDisconnect(sfSession::SPtr sessionPtr, const std::string& errorMess
     sfDetailsPanelManager::Get().CleanUp();
 }
 
-void sfUI::RefreshMissingAssetsWarning()
-{
-    if (m_missingAssetsPanel.NumMissingAssets() == 0)
-    {
-        m_onlinePanel.ClearMessage();
-    }
-    else
-    {
-        FString str;
-        if (m_missingAssetsPanel.NumMissingAssets() == 1)
-        {
-            str = "1 missing asset.";
-        }
-        else
-        {
-            str = FString::FromInt(m_missingAssetsPanel.NumMissingAssets()) + " missing assets.";
-        }
-        m_onlinePanel.DisplayMessage(str, sfUIMessageBox::Icon::WARNING, 
-            sfUIMessageBox::OnClickDelegate::CreateLambda([this]()
-        {
-            FGlobalTabmanager::Get()->InvokeTab(MissingAssetsTabName);
-        }));
-    }
-}
-
 void sfUI::OnExtendToolBar(FToolBarBuilder& builder)
 {
     builder.AddToolBarButton(sfUICommands::Get().ToolBarClickPtr);
 
     // TODO: Add drop down menu with other SF links 
-    TAttribute<FText> label;
-    label.Set(FText::FromString(TEXT("Scene Fusion Options")));
-    builder.AddComboButton(
-        FUIAction(),
-        FOnGetContent::CreateRaw(this, &sfUI::OnCreateToolBarMenu),
-        label,
-        label,
-        FSlateIcon(),
-        true
-    );
+    //TAttribute<FText> label;
+    //label.Set(FText::FromString(TEXT("Scene Fusion Options")));
+    //builder.AddComboButton(
+    //    FUIAction(),
+    //    FOnGetContent::CreateRaw(this, &sfUI::OnCreateToolBarMenu),
+    //    label,
+    //    label,
+    //    FSlateIcon(),
+    //    true
+    //);
 }
 
 TSharedRef<SWidget> sfUI::OnCreateToolBarMenu()
@@ -338,7 +264,7 @@ TSharedRef<SWidget> sfUI::OnCreateToolBarMenu()
 
     // Add menu bar commands
     builder.AddMenuEntry(
-        sfUICommands::Get().MissingAssetsPtr,
+        sfUICommands::Get().ToolBarClickPtr,
         NAME_None,
         TAttribute<FText>(),
         TAttribute<FText>(),
@@ -370,20 +296,6 @@ TSharedRef<SDockTab> sfUI::OnCreateSFTab(const FSpawnTabArgs& args)
         m_loginPanel.Authenticate();
     }
 
-    return tab;
-}
-
-TSharedRef<SDockTab> sfUI::OnCreateMissingAssetsTab(const FSpawnTabArgs& args)
-{
-    auto tab = SNew(SDockTab)
-        .Icon(sfUIStyles::Get().GetBrush("SceneFusion.TabIcon"))
-        .TabRole(NomadTab)
-        [
-            SAssignNew(m_missingAssetsPtr, SWidgetSwitcher)
-        ];
-
-    m_missingAssetsPtr->AddSlot(0).AttachWidget(m_missingAssetsPanel.Widget());
-    m_missingAssetsPtr->SetActiveWidget(m_missingAssetsPanel.Widget());
     return tab;
 }
 
