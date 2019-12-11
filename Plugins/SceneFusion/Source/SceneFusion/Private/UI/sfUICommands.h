@@ -17,5 +17,4 @@ public:
 
     // Commands
     TSharedPtr<FUICommandInfo> ToolBarClickPtr;
-    TSharedPtr<FUICommandInfo> MissingAssetsPtr;
 };

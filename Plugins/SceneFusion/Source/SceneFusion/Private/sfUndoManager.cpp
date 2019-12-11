@@ -314,7 +314,7 @@ void sfUndoManager::FixTransactedComponentChildren()
     for (USceneComponent* componentPtr : m_childrenToCheck)
     {
         USceneComponent* parentPtr = componentPtr->GetAttachParent();
-        if (parentPtr == nullptr || parentPtr == componentPtr)
+        if (parentPtr == nullptr)
         {
             continue;
         }
@@ -324,24 +324,12 @@ void sfUndoManager::FixTransactedComponentChildren()
             USceneComponent* rootPtr = actorPtr->GetRootComponent();
             if (rootPtr == nullptr)
             {
-                componentPtr->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+                componentPtr->DetachFromComponent(FDetachmentTransformRules::KeepRelativeTransform);
                 actorPtr->SetRootComponent(componentPtr);
-            }
-            else if (componentPtr == rootPtr)
-            {
-                UObjectProperty* upropPtr = Cast<UObjectProperty>(
-                    USceneComponent::StaticClass()->FindPropertyByName(FName("AttachParent")));
-                if (upropPtr != nullptr)
-                {
-                    upropPtr->SetObjectPropertyValue_InContainer(componentPtr, nullptr);
-                }
-                componentPtr->RelativeLocation = componentPtr->GetComponentTransform().GetTranslation();
-                componentPtr->RelativeRotation = componentPtr->GetComponentRotation();
-                componentPtr->RelativeScale3D = componentPtr->GetComponentScale();
             }
             else
             {
-                componentPtr->AttachToComponent(rootPtr, FAttachmentTransformRules::KeepWorldTransform);
+                componentPtr->AttachToComponent(rootPtr, FAttachmentTransformRules::KeepRelativeTransform);
             }
         }
         else if (!parentPtr->GetAttachChildren().Contains(componentPtr))

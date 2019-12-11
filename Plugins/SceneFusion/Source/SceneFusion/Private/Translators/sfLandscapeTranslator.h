@@ -82,17 +82,10 @@ private:
     {
     public:
         static const int None = -1;
-#if ENGINE_MAJOR_VERSION >= 4 && ENGINE_MINOR_VERSION >= 23
-        static const int AddComponent = 15;
-        static const int DeleteComponent = 16;
-        static const int MoveToLevel = 17;
-        static const int Splines = 21;
-#else
         static const int AddComponent = 14;
         static const int DeleteComponent = 15;
         static const int MoveToLevel = 16;
         static const int Splines = 20;
-#endif
     };
 
     // Lanscape texture types

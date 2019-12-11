@@ -136,7 +136,7 @@ void sfFoliageTranslator::SyncFoliageTypes(AInstancedFoliageActor* actorPtr)
     {
         return;
     }
-    componentTranslatorPtr->SyncComponents(actorPtr);
+    componentTranslatorPtr->SyncComponents(actorPtr, objPtr);
 
     // If we don't set pending kill components to nullptr, we won't be able to add foliage for that type.
     for (auto& iter : GetFoliageInfos(actorPtr))

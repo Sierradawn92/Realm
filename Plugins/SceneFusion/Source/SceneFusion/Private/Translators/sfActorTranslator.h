@@ -67,6 +67,18 @@ public:
     OnLockStateChangeDelegate OnLockStateChange;
 
     /**
+     * Delegate for on deselect.
+     *
+     * @param   AActor* actorPtr that was deselected.
+     */
+    DECLARE_MULTICAST_DELEGATE_OneParam(OnDeselectDelegate, AActor*);
+
+    /**
+     * Invoked when an actor is deselected.
+     */
+    OnDeselectDelegate OnDeselect;
+
+    /**
      * Constructor
      */
     sfActorTranslator();
@@ -168,8 +180,10 @@ private:
     FDelegateHandle m_onActorDetachedHandle;
     FDelegateHandle m_onFolderChangeHandle;
     FDelegateHandle m_onLabelChangeHandle;
-    FDelegateHandle m_onSelectHandle;
-    FDelegateHandle m_onDeselectHandle;
+    FDelegateHandle m_onLevelDirtiedHandle;
+    FDelegateHandle m_onMoveStartHandle;
+    FDelegateHandle m_onMoveEndHandle;
+    FDelegateHandle m_onActorMovedHandle;
     FDelegateHandle m_tickHandle;
 
     TArray<AActor*> m_uploadList;
@@ -178,11 +192,16 @@ private:
     TArray<AActor*> m_syncParentList;
     TArray<FString> m_foldersToCheck;
 
+    // Use std map because TSortedMap causes compile errors in Unreal's code
+    std::map<AActor*, sfObject::SPtr> m_selectedActors;
     std::unordered_map<UClass*, Initializer> m_actorInitializers;
     std::unordered_map<UClass*, Initializer> m_objectInitializers;
     TSet<UClass*> m_hiddenSyncTypes;
     sfSession::SPtr m_sessionPtr;
     int m_numSyncedActors;
+    bool m_movingActors;
+    bool m_movingBrush;
+    TSet<AActor*> m_movedActors;
     bool m_collectGarbage;
     float m_bspRebuildDelay;
 
@@ -200,6 +219,11 @@ private:
      * @return  bool true if hidden actors of the given class should be synced.
      */
     bool IsHiddenSyncType(UClass* classPtr);
+
+    /**
+     * Checks for selection changes and requests locks on newly selected objects and unlocks unselected objects.
+     */
+    void UpdateSelection();
 
     /**
      * Destroys an actor.
@@ -237,6 +261,20 @@ private:
      * Deletes folders that were emptied by other users.
      */
     void DeleteEmptyFolders();
+
+    /**
+     * Decreases the rebuild bsp timer and rebuilds bsp if it reaches 0.
+     *
+     * @param   deltaTime in seconds since the last cick.
+     */
+    void RebuildBSPIfNeeded(float deltaTime);
+
+    /**
+     * Marks a level as needing it's BSP rebuilt, and resets a timer to rebuild BSP.
+     *
+     * @param   ULevel* levelPtr whose BSP needs to be rebuilt.
+     */
+    void MarkBSPStale(ULevel* levelPtr);
 
     /**
      * Recursively removes child components of a deleted actor from the sfObjectMap. Optionally removes child actors or
@@ -308,18 +346,30 @@ private:
     void OnLabelChanged(AActor* actorPtr);
 
     /**
-     * Called when an actor is selected. Sends a lock request for the actor.
-     *
-     * @param   AActor* actorPtr that was selected.
+     * Called when a level is dirtied. Checks for changes to the selected brush's poly flags.
      */
-    void OnSelect(AActor* actorPtr);
+    void OnLevelDirtied();
 
     /**
-     * Called when an actor is deselected. Releases the lock on the actor.
+     * Called when an object starts being dragged in the viewport.
      *
-     * @param   AActor actorPtr that was deselected.
+     * @param   UObject& obj
      */
-    void OnDeselect(AActor* actorPtr);
+    void OnMoveStart(UObject& obj);
+
+    /**
+     * Called when an object stops being dragged in the viewport.
+     *
+     * @param   UObject& object
+     */
+    void OnMoveEnd(UObject& obj);
+
+    /**
+     * Called when an actor moves.
+     *
+     * @param   AActor* actorPtr
+     */
+    void OnActorMoved(AActor* actorPtr);
 
     /**
      * Called for each actor in an undo delete transaction, or redo create transaction. Recreates the actor on the
@@ -405,6 +455,13 @@ private:
      * @param   const std::list<sfObject::SPtr>& objects
      */
     void FindAndAttachChildren(const std::list<sfObject::SPtr>& objects);
+
+    /**
+     * Checks for and sends transform changes for selected components in an actor to the server.
+     *
+     * @param   AActor* actorPtr to send transform update for.
+     */
+    void SyncComponentTransforms(AActor* actorPtr);
 
     /**
      * Registers property change handlers for server events.

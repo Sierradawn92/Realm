@@ -58,7 +58,7 @@ void sfWriter::Write(
                 *outputPtr << ",\n";
             }
             first = false;
-            Write(outputPtr, iter, sessionPtr, depth + 1, true);
+            Write(outputPtr, objPtr, sessionPtr, depth + 1, true);
         }
         *outputPtr << "\n";
         // indentation

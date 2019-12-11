@@ -1,5 +1,4 @@
 #include "sfModelTranslator.h"
-#include "sfComponentTranslator.h"
 #include "../sfObjectMap.h"
 #include "../Consts.h"
 #include "../sfBufferArchive.h"
@@ -7,8 +6,6 @@
 #include "../Components/sfLockComponent.h"
 #include "../sfPropertyManager.h"
 #include "../sfUndoManager.h"
-#include "../sfSelectionManager.h"
-#include "../sfActorUtil.h"
 #include "../UI/sfDetailsPanelManager.h"
 #include <sfValueProperty.h>
 #include <Engine/Brush.h>
@@ -17,28 +14,18 @@
 #include <Editor.h>
 #include <Components/BrushComponent.h>
 
-// In seconds
-#define BSP_REBUILD_DELAY .2f;
 #define SYNC_DELAY 0.1f;
 
 using namespace KS;
-
-sfModelTranslator::sfModelTranslator()
-{
-    sfPropertyManager::Get().AddPropertyToForceSyncList("Brush", "BrushBuilder");
-    sfPropertyManager::Get().AddPropertyToForceSyncList("Brush", "PolyFlags");
-}
 
 void sfModelTranslator::Initialize()
 {
     m_actorTranslatorPtr = SceneFusion::Get().GetTranslator<sfActorTranslator>(sfType::Actor);
     m_checkChangeTimer = 0;
-    m_bspRebuildDelay = -1.0f;
 
     m_tickHandle = SceneFusion::Get().OnTick.AddRaw(this, &sfModelTranslator::Tick);
     m_onLevelDirtiedHandle = ULevel::LevelDirtiedEvent.AddRaw(this, &sfModelTranslator::OnLevelDirtied);
-    m_onDeselectHandle = sfSelectionManager::Get().OnDeselect.AddRaw(this, &sfModelTranslator::OnDeselect);
-    m_onLockHandle = m_actorTranslatorPtr->OnLockStateChange.AddRaw(this, &sfModelTranslator::OnLockChange);
+    m_onDeselectHandle = m_actorTranslatorPtr->OnDeselect.AddRaw(this, &sfModelTranslator::OnDeselect);
     
     // Register ABrush initializers to initialize/sync the model
     m_actorTranslatorPtr->RegisterActorInitializer<ABrush>([this](sfObject::SPtr objPtr, AActor* actorPtr)
@@ -51,6 +38,7 @@ void sfModelTranslator::Initialize()
         brushPtr->GetBrushComponent()->Brush = modelPtr;
         brushPtr->Brush = modelPtr;
     });
+
     m_actorTranslatorPtr->RegisterObjectInitializer<ABrush>([this](sfObject::SPtr objPtr, AActor* actorPtr)
     {
         ABrush* brushPtr = Cast<ABrush>(actorPtr);
@@ -61,41 +49,6 @@ void sfModelTranslator::Initialize()
         sfObject::SPtr childPtr = CreateObject(brushPtr->Brush);
         objPtr->AddChild(childPtr);
     });
-    m_actorTranslatorPtr->RegisterPostPropertyChangeHandler<ABrush>("BrushType", [this](UObject* uobjPtr)
-    {
-        ABrush* brushPtr = Cast<ABrush>(uobjPtr);
-        if (brushPtr != nullptr)
-        {
-            MarkBSPStale(brushPtr->GetLevel());
-        }
-    });
-    m_actorTranslatorPtr->RegisterPostPropertyChangeHandler<ABrush>("PolyFlags", [this](UObject* uobjPtr)
-    {
-        ABrush* brushPtr = Cast<ABrush>(uobjPtr);
-        if (brushPtr != nullptr)
-        {
-            MarkBSPStale(brushPtr->GetLevel());
-        }
-    });
-
-    TSharedPtr<sfComponentTranslator> componentTranslatorPtr = SceneFusion::Get().GetTranslator<sfComponentTranslator>(
-        sfType::Component);
-    componentTranslatorPtr->RegisterTransformChangeHandler<UBrushComponent>(
-        [this](sfObject::SPtr objPtr, USceneComponent* componentPtr)
-    {
-        ABrush* brushPtr = Cast<ABrush>(componentPtr->GetOwner());
-        if (brushPtr != nullptr)
-        {
-            MarkBSPStale(brushPtr->GetLevel());
-        }
-    });
-
-    sfObjectMap::RegisterRemoveHandler<ABrush>([this](sfObject::SPtr objPtr, UObject* uobjPtr)
-    {
-        m_bspRebuildDelay = BSP_REBUILD_DELAY;
-        ABrush* brushPtr = Cast<ABrush>(uobjPtr);
-        UsfLockComponent::DestroyModelMesh(brushPtr);
-    });
 }
 
 void sfModelTranslator::CleanUp()
@@ -104,16 +57,13 @@ void sfModelTranslator::CleanUp()
     m_rebuiltModels.clear();
     SceneFusion::Get().OnTick.Remove(m_tickHandle);
     ULevel::LevelDirtiedEvent.Remove(m_onLevelDirtiedHandle);
-    sfSelectionManager::Get().OnDeselect.Remove(m_onDeselectHandle);
-    m_actorTranslatorPtr->OnLockStateChange.Remove(m_onLockHandle);
+    m_actorTranslatorPtr->OnDeselect.Remove(m_onDeselectHandle);
     m_actorTranslatorPtr->UnregisterActorInitializer<ABrush>();
     m_actorTranslatorPtr->UnregisterObjectInitializer<ABrush>();
 }
 
 void sfModelTranslator::Tick(float deltaTime)
 {
-    RebuildBSPIfNeeded(deltaTime);
-
     if (m_rebuiltModels.size() > 0 && !ABrush::NeedsRebuild())
     {
         for (sfObject::SPtr objPtr : m_rebuiltModels)
@@ -194,7 +144,7 @@ void sfModelTranslator::ApplyServerData(UModel* modelPtr, sfProperty::SPtr propP
     ABrush* brushPtr = Cast<ABrush>(modelPtr->GetOuter());
     if (brushPtr != nullptr)
     {
-        MarkBSPStale(brushPtr->GetLevel());
+        m_actorTranslatorPtr->MarkBSPStale(brushPtr->GetLevel());
     }
 }
 
@@ -273,21 +223,6 @@ void sfModelTranslator::OnDeselect(AActor* actorPtr)
 
 void sfModelTranslator::OnLevelDirtied()
 {
-    if (sfUndoManager::Get().GetUndoText() == "SetBrushProperties")
-    {
-        TSet<AActor*> selectedActors;
-        sfDetailsPanelManager::Get().GetSelectedActors(selectedActors);
-        for (AActor* actorPtr : selectedActors)
-        {
-            ABrush* brushPtr = Cast<ABrush>(actorPtr);
-            if (brushPtr != nullptr)
-            {
-                sfPropertyManager::Get().SyncProperty(sfObjectMap::GetSFObject(brushPtr), brushPtr, "PolyFlags");
-            }
-        }
-        return;
-    }
-
     // Changing a model surface's alignment doesn't trigger the OnUObjectModified, but it does trigger OnLevelDirtied
     // with no transaction and sets InvalidSurfaces and bOnRebuildMaterialIndexBuffers to true on the level model,
     // which we detect to determine if we need to send model changes for selected brushes.
@@ -315,50 +250,6 @@ void sfModelTranslator::OnLevelDirtied()
             }
         }
     }
-}
-
-void sfModelTranslator::OnLockChange(AActor* actorPtr, sfActorTranslator::LockType lockType, sfUser::SPtr userPtr)
-{
-    if (!actorPtr->IsA<ABrush>() || lockType == sfActorTranslator::LockType::Unlocked ||
-        lockType == sfActorTranslator::LockType::NotSynced)
-    {
-        return;
-    }
-    UsfLockComponent* lockPtr = sfActorUtil::GetComponent<UsfLockComponent>(actorPtr);
-    if (lockPtr != nullptr)
-    {
-        lockPtr->CreateOrFindModelMesh(SceneFusion::GetLockMaterial(userPtr));
-    }
-}
-
-void sfModelTranslator::RebuildBSPIfNeeded(float deltaTime)
-{
-    if (m_bspRebuildDelay >= 0.0f)
-    {
-        if (sfSelectionManager::Get().MovingBrush())
-        {
-            // If we rebuild bsp while moving a brush, it will interfere with the brush movement. The bsp will get
-            // rebuilt automatically when we stop moving the brush so we don't have to do anything.
-            m_bspRebuildDelay = 0;
-        }
-        else
-        {
-            m_bspRebuildDelay -= deltaTime;
-            if (m_bspRebuildDelay < 0.0f)
-            {
-                SceneFusion::ObjectEventDispatcher->DisableOnUObjectModified();
-                SceneFusion::RedrawActiveViewport();
-                GEditor->RebuildAlteredBSP();
-                SceneFusion::ObjectEventDispatcher->EnableOnUObjectModified();
-            }
-        }
-    }
-}
-
-void sfModelTranslator::MarkBSPStale(ULevel* levelPtr)
-{
-    ABrush::SetNeedRebuild(levelPtr);
-    m_bspRebuildDelay = BSP_REBUILD_DELAY;
 }
 
 void sfModelTranslator::Serialize(FArchive& archive, UModel* modelPtr)
@@ -441,4 +332,3 @@ void sfModelTranslator::Serialize(FArchive& archive, FLightmassPrimitiveSettings
 }
 
 #undef SYNC_DELAY
-#undef BSP_REBUILD_DELAY

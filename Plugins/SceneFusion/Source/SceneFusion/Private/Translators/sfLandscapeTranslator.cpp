@@ -413,7 +413,7 @@ void sfLandscapeTranslator::Tick(float deltaTime)
             {
                 // Check for added/deleted components
                 SceneFusion::Get().GetTranslator<sfComponentTranslator>(sfType::Component)
-                    ->SyncComponents(landscapePtr);
+                    ->SyncComponents(landscapePtr, objPtr);
             }
         }
     }
@@ -709,7 +709,7 @@ void sfLandscapeTranslator::OnUObjectModified(UObject* uobjPtr)
                     {
                         TSharedPtr<sfComponentTranslator> componentTranslatorPtr = SceneFusion::Get()
                             .GetTranslator<sfComponentTranslator>(sfType::Component);
-                        componentTranslatorPtr->SyncComponents(landscapePtr);
+                        componentTranslatorPtr->SyncComponents(landscapePtr, objPtr);
                         sfPropertyManager::Get().SyncProperty(objPtr, landscapePtr, sfProp::SplineComponent->c_str());
                         // Trigger a tool change event to unlock the landscape and lock the spline component
                         if (landscapePtr == m_activeLandscapePtr && m_tool == Tools::Splines)
@@ -886,7 +886,7 @@ void sfLandscapeTranslator::PostUndo()
                 {
                     // Sync added components
                     SceneFusion::Get().GetTranslator<sfComponentTranslator>(sfType::Component)
-                        ->SyncComponents(landscapePtr);
+                        ->SyncComponents(landscapePtr, sfObjectMap::GetSFObject(landscapePtr));
                     continue;
                 }
                 sfDictionaryProperty::SPtr propsPtr = objPtr->Property()->AsDict();
@@ -1971,9 +1971,6 @@ void sfLandscapeTranslator::SplitHeightmap(ULandscapeComponent* componentPtr, UO
         heightmapPtr = componentPtr->GetLandscapeProxy()->CreateLandscapeTexture(heightmapSizeU, heightmapSizeV,
             TEXTUREGROUP_Terrain_Heightmap, TSF_BGRA8, outerPtr);
 
-#if ENGINE_MAJOR_VERSION >= 4 && ENGINE_MINOR_VERSION >= 23
-        ULandscapeComponent::CreateEmptyTextureMips(heightmapPtr, true);
-#else
         int mipSubsectionSizeQuads = componentPtr->SubsectionSizeQuads;
         int mipSizeU = heightmapSizeU;
         int mipSizeV = heightmapSizeV;
@@ -1988,21 +1985,13 @@ void sfLandscapeTranslator::SplitHeightmap(ULandscapeComponent* componentPtr, UO
 
             mipSubsectionSizeQuads = ((mipSubsectionSizeQuads + 1) >> 1) - 1;
         }
-#endif
 
         componentPtr->HeightmapScaleBias = FVector4(1.0f / (float)heightmapSizeU,
             1.0f / (float)heightmapSizeV, 0.0f, 0.0f);
 
         SetHeightmap(componentPtr, heightmapPtr);
+        componentPtr->UpdateMaterialInstances();
 
-#if ENGINE_MAJOR_VERSION >= 4 && ENGINE_MINOR_VERSION >= 23
-        landscapeEdit.SetHeightData(componentPtr->GetSectionBase().X, componentPtr->GetSectionBase().Y,
-            componentPtr->GetSectionBase().X + componentPtr->ComponentSizeQuads,
-            componentPtr->GetSectionBase().Y + componentPtr->ComponentSizeQuads,
-            (uint16*)heightData.GetData(), 0, false, (uint16*)normalData.GetData());
-        componentPtr->UpdateMaterialInstances();
-#else
-        componentPtr->UpdateMaterialInstances();
         for (int i = 0; i < heightmapMipData.Num(); i++)
         {
             heightmapPtr->Source.UnlockMip(i);
@@ -2011,7 +2000,6 @@ void sfLandscapeTranslator::SplitHeightmap(ULandscapeComponent* componentPtr, UO
             componentPtr->GetSectionBase().X + componentPtr->ComponentSizeQuads,
             componentPtr->GetSectionBase().Y + componentPtr->ComponentSizeQuads,
             (uint16*)heightData.GetData(), 0, false, (uint16*)normalData.GetData());
-#endif
     }
 
     // End of LandscapeEdit interface

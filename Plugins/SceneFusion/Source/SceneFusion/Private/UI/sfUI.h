@@ -3,7 +3,6 @@
 #include "sfUISessionsPanel.h"
 #include "sfUILoginPanel.h"
 #include "sfUIOnlinePanel.h"
-#include "sfMissingAssetsPanel.h"
 #include "sfOutlinerManager.h"
 #include "../sfSessionInfo.h"
 #include <sfSession.h>
@@ -62,21 +61,15 @@ private:
     // UI components
     TSharedPtr<SWidgetSwitcher> m_panelSwitcherPtr;
     TSharedPtr<SWidget> m_activeWidget;
-    TSharedPtr<SWidgetSwitcher> m_missingAssetsPtr;
     sfUISessionsPanel m_sessionsPanel;
     sfUIOnlinePanel m_onlinePanel;
     sfUILoginPanel m_loginPanel;
-    sfMissingAssetsPanel m_missingAssetsPanel;
 
     // Event pointers
     KS::ksEvent<sfSession::SPtr&, const std::string&>::SPtr m_disconnectEventPtr;
     KS::ksEvent<sfUser::SPtr&>::SPtr m_userJoinEventPtr;
     KS::ksEvent<sfUser::SPtr&>::SPtr m_userLeaveEventPtr;
     KS::ksEvent<sfUser::SPtr&>::SPtr m_userColorChangeEventPtr;
-    FDelegateHandle m_onCreateStandInHandle;
-    FDelegateHandle m_onReplaceStandInHandle;
-    FDelegateHandle m_onMissingAssetHandle;
-    FDelegateHandle m_onFoundAssetHandle;
 
     TSharedPtr<sfOutlinerManager> m_outlinerManagerPtr;
 
@@ -149,12 +142,6 @@ private:
     void OnExtendToolBar(FToolBarBuilder& builder);
 
     /**
-     * Updates the missing assets warning in the online panel with the number of missing assets, or hides the message
-     * if there are no missing assets.
-     */
-    void RefreshMissingAssetsWarning();
-
-    /**
      * Create tool bar menu.
      * 
      * @return  TSharedRef<SWidget>
@@ -168,6 +155,4 @@ private:
      * @return  TSharedRef<SDockTab>
      */
     TSharedRef<SDockTab> OnCreateSFTab(const FSpawnTabArgs& args);
-
-    TSharedRef<SDockTab> OnCreateMissingAssetsTab(const FSpawnTabArgs& args);
 };

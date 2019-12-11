@@ -19,8 +19,6 @@ void sfUICommands::RegisterCommands()
 {
     UI_COMMAND(ToolBarClickPtr, "Scene Fusion", "Open the Scene Fusion tab", 
         EUserInterfaceActionType::Button, FInputGesture());
-    UI_COMMAND(MissingAssetsPtr, "Missing Assets", "Open the Scene Fusion Missing Assets tab",
-        EUserInterfaceActionType::Button, FInputGesture());
 }
 
 #undef LOCTEXT_NAMESPACE

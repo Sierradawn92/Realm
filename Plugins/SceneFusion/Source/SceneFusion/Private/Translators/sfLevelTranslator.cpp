@@ -1,7 +1,6 @@
 #include "sfLevelTranslator.h"
 #include "sfUObjectTranslator.h"
 #include "sfAvatarTranslator.h"
-#include "sfModelTranslator.h"
 #include "../Consts.h"
 #include "../sfPropertyUtil.h"
 #include "../sfPropertyManager.h"
@@ -9,7 +8,6 @@
 #include "../../Public/SceneFusion.h"
 #include "../sfUnrealUtils.h"
 #include "../sfObjectMap.h"
-#include "../sfSelectionManager.h"
 #include "../Actors/sfMissingActor.h"
 #include "../Objects/sfReferenceTracker.h"
 
@@ -153,11 +151,6 @@ void sfLevelTranslator::PreTick(float deltaTime)
         {
             continue;
         }
-        sfProperty::SPtr propPtr;
-        if (!iter->second->Property()->AsDict()->TryGet(sfProp::Actors, propPtr))
-        {
-            continue;
-        }
         sfListProperty::SPtr actorListPtr = sfListProperty::Create();
         for (AActor* actorPtr : levelPtr->Actors)
         {
@@ -167,7 +160,8 @@ void sfLevelTranslator::PreTick(float deltaTime)
                 actorListPtr->Add(sfValueProperty::Create(objPtr->Id()));
             }
         }
-        sfPropertyManager::Get().CopyList(propPtr->AsList(), actorListPtr);
+        sfListProperty::SPtr listPtr = iter->second->Property()->AsDict()->Get(sfProp::Actors)->AsList();
+        sfPropertyManager::Get().CopyList(listPtr, actorListPtr);
     }
     m_localActorOrderChangedLevels.Empty();
 }
@@ -383,9 +377,7 @@ void sfLevelTranslator::UpdateActorOrder()
         // Rebuild bsp if any brushes were reordered.
         if (rebuildBSP)
         {
-            TSharedPtr<sfModelTranslator> modelTranslatorPtr = SceneFusion::Get().GetTranslator<sfModelTranslator>(
-                sfType::Model);
-            modelTranslatorPtr->MarkBSPStale(levelPtr);
+            m_actorTranslatorPtr->MarkBSPStale(levelPtr);
         }
     }
     m_serverActorOrderChangedLevels.Empty();
@@ -585,7 +577,7 @@ void sfLevelTranslator::OnCreateWorldSettingsObject(sfObject::SPtr worldSettings
     m_hierarchicalLODSetupDirty = true;
 
     TryToggleWorldComposition(GetWorldCompositionOnServer());
-
+    
     // Set references to the world settings actor.
     std::vector<sfReferenceProperty::SPtr> references = m_sessionPtr->GetReferences(m_worldSettingsObjPtr);
     sfPropertyManager::Get().SetReferences(worldSettingsPtr, references);
@@ -771,7 +763,6 @@ ULevel* sfLevelTranslator::TryLoadLevelFromFile(FString levelPath, bool isPersis
                 avatarTranslatorPtr->RecreateAllAvatars();
             }
             m_actorTranslatorPtr->ClearActorCollections();
-            sfSelectionManager::Get().Clear();
             m_worldPtr = GEditor->GetEditorWorldContext().World();
             return m_worldPtr->PersistentLevel;
         }
@@ -808,10 +799,10 @@ ULevel* sfLevelTranslator::CreateMap(FString levelPath, bool isPersistentLevel)
 {
     if (isPersistentLevel)
     {
-        GEditor->CreateNewMapForEditing();
-        if (GWorld != m_worldPtr)
+        // Prompts the user to save the dirty levels before load map
+        if (FEditorFileUtils::SaveDirtyPackages(true, true, false))
         {
-            m_worldPtr = GWorld;
+            m_worldPtr = GUnrealEd->NewMap();
             if (!levelPath.StartsWith("/Temp/"))
             {
                 FEditorFileUtils::SaveLevel(m_worldPtr->PersistentLevel, levelPath);
@@ -825,7 +816,6 @@ ULevel* sfLevelTranslator::CreateMap(FString levelPath, bool isPersistentLevel)
                 avatarManagerPtr->RecreateAllAvatars();
             }
             m_actorTranslatorPtr->ClearActorCollections();
-            sfSelectionManager::Get().Clear();
             return m_worldPtr->PersistentLevel;
         }
     }
@@ -1014,7 +1004,7 @@ bool sfLevelTranslator::Create(UObject* uobjPtr, sfObject::SPtr& outObjPtr)
     ULevel* levelPtr = Cast<ULevel>(uobjPtr);
     if (levelPtr != nullptr)
     {
-        sfObject::ObjectFlags flags = levelPtr->IsPersistentLevel() ?
+        sfObject::ObjectFlags flags = levelPtr->IsPersistentLevel() ? 
             sfObject::ObjectFlags::NoFlags : sfObject::ObjectFlags::OptionalChildren;
         outObjPtr = sfObject::Create(sfType::Level, sfDictionaryProperty::Create(), flags);
         sfObjectMap::Add(outObjPtr, uobjPtr);
@@ -1456,7 +1446,7 @@ void sfLevelTranslator::RequestLock()
 
     if (m_lockObject != nullptr &&
         (m_sessionPtr->LocalUser() == nullptr ||
-            m_lockObject->LockOwner() != m_sessionPtr->LocalUser()))
+        m_lockObject->LockOwner() != m_sessionPtr->LocalUser()))
     {
         m_lockObject->RequestLock();
     }

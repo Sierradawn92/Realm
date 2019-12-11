@@ -88,19 +88,13 @@ public:
     void SyncTransform(USceneComponent* componentPtr, bool applyServerValues = false);
 
     /**
-     * Checks for and sends transform changes for all components in an actor.
-     *
-     * @param   AActor* actorPtr to send transform update for.
-     */
-    void SyncComponentTransforms(AActor* actorPtr);
-
-    /**
      * Checks for new, deleted, renamed, and reparented components and sends changes to the server, or reverts to the
      * server state if the actor is locked.
      *
      * @param   AActor* actorPtr to sync components for.
+     * @param   sfObject::SPtr actorObjPtr
      */
-    void SyncComponents(AActor* actorPtr);
+    void SyncComponents(AActor* actorPtr, sfObject::SPtr actorObjPtr);
 
     /**
      * Registers a function to initialize components of type T.
@@ -247,8 +241,6 @@ private:
     TSharedPtr<sfActorTranslator> m_actorTranslatorPtr;
     FDelegateHandle m_onApplyObjectToActorHandle;
     FDelegateHandle m_tickHandle;
-    FDelegateHandle m_onDeselectHandle;
-    FDelegateHandle m_onMoveHandle;
     std::unordered_map<UClass*, Initializer> m_componentInitializers;
     std::unordered_map<UClass*, Initializer> m_objectInitializers;
     std::unordered_map<UClass*, DeleteHandler> m_deleteHandlers;

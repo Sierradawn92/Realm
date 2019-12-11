@@ -1,10 +1,7 @@
 #pragma once
 
 #include "sfMissingObject.h"
-#include <sfObject.h>
 #include <Runtime/Engine/Classes/Engine/AssetManager.h>
-
-using namespace KS::SceneFusion2;
 
 /**
  * Maps missing class/blueprint names to stand-in objects and replaces the stand-ins with the correct class/blueprint
@@ -13,31 +10,6 @@ using namespace KS::SceneFusion2;
 class sfMissingObjectManager
 {
 public:
-    /**
-     * Delegate for on new stand-in.
-     *
-     * @param   const FString& path to missing asset.
-     * @param   UObject* stand-in
-     */
-    DECLARE_MULTICAST_DELEGATE_OneParam(OnMissingAssetDelegate, const FString&);
-
-    /**
-     * Delegate for on replace missing asset.
-     *
-     * @param   const FString& path to asset that used to be missing.
-     */
-    DECLARE_MULTICAST_DELEGATE_OneParam(OnFoundMissingAssetDelegate, const FString&);
-
-    /**
-     * Invoked when an asset cannot be found. This is invoked once per asset path.
-     */
-    OnMissingAssetDelegate OnMissingAsset;
-
-    /**
-     * Invoked when a missing asset is found.
-     */
-    OnFoundMissingAssetDelegate OnFoundMissingAsset;
-
     /**
      * Initialization. Adds event handlers that listen for new assets.
      */
@@ -62,19 +34,9 @@ public:
      */
     void RemoveStandIn(IsfMissingObject* standInPtr);
 
-    /**
-     * Adds an sfObject for an asset that is missing. When the asset is found, the create event will be dispatched
-     * again for the sfObject.
-     *
-     * @param   const FString& path to missing asset.
-     * @param   sfObject::SPtr objPtr for the missing asset.
-     */
-    void AddMissingObject(const FString& path, sfObject::SPtr objPtr);
-
 private:
     // Maps missing class/blueprint names/paths to stand-in objects.
     TMap<FString, TArray<IsfMissingObject*>> m_standInMap;
-    TMap<FString, sfObject::SPtr> m_missingObjects;
     FDelegateHandle m_onHotReloadHandle;
     FDelegateHandle m_onNewAssetHandle;
 
