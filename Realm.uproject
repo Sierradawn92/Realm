@@ -2,15 +2,5 @@
 	"FileVersion": 3,
 	"EngineAssociation": "4.22",
 	"Category": "",
-	"Description": "",
-	"Plugins": [
-		{
-			"Name": "RLPlugin",
-			"Enabled": true
-		},
-		{
-			"Name": "SceneFusion",
-			"Enabled": true
-		}
-	]
+	"Description": ""
 }
